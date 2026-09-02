@@ -1,0 +1,7 @@
+{
+  "name": "quinn-engine",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Marklinea discovery engine for the Qapita demo (Vercel serverless)",
+  "engines": { "node": ">=18" }
+}
