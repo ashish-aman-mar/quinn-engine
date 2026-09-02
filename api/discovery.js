@@ -6,7 +6,8 @@
  * The model runs the discovery call: it decides what to acknowledge, what to ask next,
  * when a slide helps, and when it has enough to propose the call. Structured JSON out.
  *
- * Env: ANTHROPIC_API_KEY (preferred) or OPENAI_API_KEY. Optional: MODEL, ALLOWED_ORIGIN.
+ * Env: AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_API_KEY (GPT-5.1 on Azure AI Foundry), or ANTHROPIC_API_KEY, or OPENAI_API_KEY.
+ * Optional: MODEL (deployment name), REASONING, ALLOWED_ORIGIN.
  */
 
 const QAPITA_FACTS = `
@@ -72,7 +73,37 @@ async function callOpenAI(system, user) {
   const j = await r.json();
   return j.choices[0].message.content;
 }
-const llm = (s, u) => process.env.ANTHROPIC_API_KEY ? callAnthropic(s, u) : callOpenAI(s, u);
+/* Azure AI Foundry / Azure OpenAI — v1 Responses API (GPT-5.x). Env:
+   AZURE_OPENAI_ENDPOINT = https://<resource>.services.ai.azure.com/openai/v1/responses
+   AZURE_OPENAI_API_KEY  = key
+   MODEL                 = deployment name, e.g. gpt-5.1
+   REASONING             = minimal | low | medium (default low) */
+async function callAzure(system, user) {
+  const model = process.env.MODEL || 'gpt-5.1';
+  const body = {
+    model,
+    input: [{ role: 'system', content: system }, { role: 'user', content: user }],
+    max_output_tokens: 700,
+    text: { format: { type: 'json_object' } }
+  };
+  if (/^gpt-5|^o[1-9]/i.test(model)) body.reasoning = { effort: process.env.REASONING || 'low' };
+  const r = await fetch(process.env.AZURE_OPENAI_ENDPOINT, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'api-key': process.env.AZURE_OPENAI_API_KEY, authorization: 'Bearer ' + process.env.AZURE_OPENAI_API_KEY },
+    body: JSON.stringify(body)
+  });
+  if (!r.ok) throw new Error('azure ' + r.status + ' ' + (await r.text()).slice(0, 300));
+  const j = await r.json();
+  if (typeof j.output_text === 'string' && j.output_text.trim()) return j.output_text;
+  const parts = [];
+  for (const item of (j.output || [])) {
+    if (item.type === 'message') for (const c of (item.content || [])) if (c.type === 'output_text' && c.text) parts.push(c.text);
+  }
+  if (!parts.length) throw new Error('azure: no output_text in response');
+  return parts.join('');
+}
+const llm = (s, u) => process.env.AZURE_OPENAI_API_KEY ? callAzure(s, u)
+                    : process.env.ANTHROPIC_API_KEY ? callAnthropic(s, u) : callOpenAI(s, u);
 
 function parseJSON(text) {
   const m = String(text).match(/\{[\s\S]*\}/);
