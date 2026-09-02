@@ -3,6 +3,7 @@
  * Serverless function (Vercel). One endpoint, three modes:
  *   mode: "pounce"    -> { opener }
  *   mode: "chat"      -> { reply, bant, slide, offer_slots, done }
+ *   mode: "summary"   -> { summary, intent, next_steps, objections }   (post-call handover)
  * The model runs the discovery call: it decides what to acknowledge, what to ask next,
  * when a slide helps, and when it has enough to propose the call. Structured JSON out.
  *
@@ -25,7 +26,7 @@ You run discovery the way a great rep does. Four things to learn: (a) current ca
 
 Stages:
 - pre_email: answer product questions from the facts, then work toward getting the visitor's work email so you can send material and continue properly.
-- discovery: run the call. When at least three of the four things are known, stop asking, summarise what you learned in one sentence, and propose a 30-minute call with a Qapita equity specialist (set offer_slots true).
+- discovery: run the call. When at least three of the four things are known, stop asking, summarise what you learned in one sentence, and propose a 30-minute call with a Qapita equity specialist (set offer_slots true). When you set offer_slots true, your reply must tell the visitor to pick one of the two times shown right below your message. The booking happens right here on screen: never say you will email options, send a link, or have someone reach out to schedule.
 - booked: the call is booked; be brief and warm.
 
 Slides you can put on screen when a picture helps (at most one per turn, only when relevant): captable, esop, pricing, liquidity, security, overview.
@@ -123,6 +124,14 @@ module.exports = async (req, res) => {
     if (body.mode === 'pounce') {
       const out = parseJSON(await llm(POUNCE_SYSTEM(name), 'Visitor behaviour: ' + (body.context || '')));
       res.writeHead(200, headers); return res.end(JSON.stringify({ opener: String(out.opener || '').trim() }));
+    }
+    if (body.mode === 'summary') {
+      const lines = (body.transcript || []).slice(-30).map(m => `${m.r}: ${String(m.t).replace(/\s+/g, ' ').slice(0, 400)}`).join('\n');
+      const sys = `You are ${name}, Qapita's AI sales engineer. A discovery conversation just ended with a booked call. Write the handover for the account executive. Respond with ONLY JSON: {"summary": string (2 to 3 sentences, what the visitor's situation is and why they are talking to Qapita), "intent": number 0-100 (buying intent, be honest), "next_steps": [2 to 3 short items for the AE], "objections": [0 to 2 short risks or open questions]}. Plain text, no markdown, no em dashes.`;
+      const out = parseJSON(await llm(sys, `Known: ${JSON.stringify(body.known || {})}\nVisitor email: ${body.email || 'unknown'}\n\nConversation:\n${lines}`));
+      res.writeHead(200, headers);
+      return res.end(JSON.stringify({ summary: String(out.summary || ''), intent: Math.max(0, Math.min(100, +out.intent || 0)),
+        next_steps: (out.next_steps || []).slice(0, 3).map(String), objections: (out.objections || []).slice(0, 2).map(String) }));
     }
     const stage = body.stage || 'pre_email';
     const known = body.known && Object.keys(body.known).length ? JSON.stringify(body.known) : 'nothing yet';
