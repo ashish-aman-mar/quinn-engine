@@ -137,8 +137,13 @@ module.exports = async (req, res) => {
     const known = body.known && Object.keys(body.known).length ? JSON.stringify(body.known) : 'nothing yet';
     const lines = (body.transcript || []).slice(-16).map(m => `${m.r}: ${String(m.t).replace(/\s+/g, ' ').slice(0, 400)}`).join('\n');
     const turn = Number.isFinite(+body.turn) ? +body.turn : 0;
-    const shown = Array.isArray(body.shown) && body.shown.length ? body.shown.join(', ') : 'none yet';
-    const user = `stage=${stage}\npage=${body.page || ''}\nvisitor_email=${body.email || 'unknown'}\nknown so far=${known}\nturn=${turn}\nslides already shown=${shown}\n\nConversation so far:\n${lines}\n\nThe visitor just said: "${String(body.latest || '').slice(0, 400)}"\n\nRespond as ${name} with the JSON object only.`;
+    const shownArr = Array.isArray(body.shown) ? body.shown : [];
+    const shown = shownArr.length ? shownArr.join(', ') : 'none yet';
+    const eligible = stage !== 'discovery' || (turn >= 6 && shownArr.length >= 3);
+    const gate = (stage === 'discovery' && !eligible)
+      ? `\nBOOKING GATE: not eligible yet (turn=${turn}, needs >=6; slides shown=${shownArr.length}, needs >=3). Do not write anything implying you are offering a call, scheduling, or picking a time — no "pick one of the times", no "let's set up a call" — unless the visitor's own message just now explicitly asked to book, talk to someone, or get a demo. Otherwise keep teaching and asking, set offer_slots false.`
+      : '';
+    const user = `stage=${stage}\npage=${body.page || ''}\nvisitor_email=${body.email || 'unknown'}\nknown so far=${known}\nturn=${turn}\nslides already shown=${shown}${gate}\n\nConversation so far:\n${lines}\n\nThe visitor just said: "${String(body.latest || '').slice(0, 400)}"\n\nRespond as ${name} with the JSON object only.`;
     const out = parseJSON(await llm(SYSTEM(name), user));
     const bant = out.bant || {};
     const result = {
